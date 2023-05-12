@@ -1,0 +1,160 @@
+/*
+ * skit.c
+ *
+ * Created: 2023-05-09 12:05:03
+ * Author : sonny
+ */ 
+#define F_CPU 8000000UL
+#include <avr/io.h>
+#include <util/delay.h>
+
+#define BUTTON_PIN 0
+#define SERVO_CONTROL 6
+#define PWM_MOTOR_A1 7
+#define PWM_MOTOR_A2 6
+#define PWM_MOTOR_B1 3
+#define PWM_MOTOR_B2 4
+
+
+
+void data_direction_init (){
+	DDRA = 0b00000000; //hela a är inputs/adc/sensor
+	DDRB &= ~(1 << BUTTON_PIN);		//resetknapp är ingång
+	//PINB |= (1 << BUTTON_PIN);	//kanske nödvändig
+	PORTB |= (1 << BUTTON_PIN);		//för referens
+	DDRD |= (1 << PWM_MOTOR_A1) | (1 << PWM_MOTOR_A2); //0x70; // Set PD5 as an output pin0x70
+	DDRB |= (1 << PWM_MOTOR_B1) | (1 << PWM_MOTOR_B2) | (1 << SERVO_CONTROL);	//pwm/pwm/servon till ir
+}
+void adc_init(){
+	ADCSRA |= (1 << ADEN);
+	ADCSRA |= (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
+	ADMUX |= (1 << REFS0); 
+}
+int adc_read(){
+	//PRR0 = 0b00000000;
+	ADCSRA |= (1<<ADSC);
+	while(ADCSRA&(1<<ADSC)){} //vänta på adc conversionen
+	return ADC;
+}
+int read_sensor(){
+	if (adc_read() > 250 && adc_read() < 800){	
+		return 1;
+	}
+	return 0;
+}
+void set_period_servo(uint16_t period){
+	// enligt handledning i labb 2, sätter perioden genom att sätta Input compare register till ett värde
+	ICR3 = period;
+}
+void set_pulse_servo(uint16_t pulse){
+	//enligt handledning i labb 2, sätter pulsen genom att sätta output compare register till ett värde
+	OCR3A = pulse;
+}
+void servo_pwm_init(){
+	TCCR3A = 0b10000010;
+	TCCR3B = 0b00011010;
+	set_period_servo(20000);
+	set_pulse_servo(800);
+}
+void rightWheel_pwm_init(){
+
+	//DDRB = 0xff; //pd6 och pd7
+	TCCR0A |= (1 << COM0A1) | (1 << WGM01) | (1 << WGM00); // Set Fast PWM mode with TOP = 0xFF, and set OC2A on compare match
+	TCCR0B |= (1 << CS01);
+}
+void leftWheel_pwm_init(){
+	
+	//DDRD = 0xff; //pd6 och pd7
+	TCCR2A |= (1 << COM2A1) | (1 << WGM21) | (1 << WGM20); // Set Fast PWM mode with TOP = 0xFF, and set OC2A on compare match
+	TCCR2B |= (1 << CS21);
+}
+void rightWheel_set_speed(int speed){
+	OCR0A = speed;
+}
+
+void leftWheel_set_speed(int speed){
+	OCR2A = speed; // Set the top value (period) for Timer/Counter2 using OCR2A
+}
+
+void drive_forward(int speed){
+	rightWheel_set_speed(speed);
+	leftWheel_set_speed(speed - 5);
+}
+
+void change_wheels(int direction, int turn){
+	
+	if((direction < 950 && turn < 1) || (direction < 850 && turn > 1)){	//långt höger
+		leftWheel_set_speed(70);
+		
+	}
+	else if((direction < 1050 && turn < 1) || (direction < 950 && turn > 1)){	//lite höger
+		leftWheel_set_speed(0);
+		
+	}
+	else if((direction < 1200 && turn < 1) || (direction < 1050 && turn > 1)){	//lite vänster
+		rightWheel_set_speed(0);
+		
+	}
+	else if((direction < 1300 && turn < 1) || (direction < 1200 && turn > 1)){	//långt vänster
+		rightWheel_set_speed(70);
+		
+	}
+	_delay_ms(200);
+	drive_forward(150);
+	//set_pulse_motor(Speed);
+}
+
+int main(void)
+{
+	int pulseValue = 800;
+	int turn = 1;	//0 = counterclockwise, 2 = clockwise
+	int sensor_buffer = 0;
+	data_direction_init();
+	adc_init();
+	servo_pwm_init();
+	//motor_pwm_init();
+	rightWheel_pwm_init();
+	leftWheel_pwm_init();
+	while(!(~PINB & (1 << BUTTON_PIN))){}
+	drive_forward(130);
+	//set_pulse_motor(wheelSpeed);
+	while (1)
+	{
+		
+		for(int i=0;i<4;i++){
+			turn = 0;
+			pulseValue=pulseValue+110;
+			set_pulse_servo(pulseValue);
+			for(int i = 0; i<300; i++){
+				read_sensor();
+				if(read_sensor()){
+					sensor_buffer++;
+				}
+				if(sensor_buffer>10){
+					change_wheels(pulseValue, turn);
+					sensor_buffer=0;
+				}
+
+			}
+			sensor_buffer=0;
+		}
+		for(int i=0;i<4;i++){
+			turn = 2;
+			pulseValue=pulseValue-110;
+			set_pulse_servo(pulseValue);
+			for(int i = 0; i<300; i++){
+				read_sensor();
+				if(read_sensor()){
+					sensor_buffer++;
+				}
+				if(sensor_buffer>10){
+					change_wheels(pulseValue, turn);
+					sensor_buffer=0;
+				}
+				
+			}
+			sensor_buffer=0;
+		}
+		
+	}
+}
